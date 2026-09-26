@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>森林情緒研究｜AMP</title>
+  <link rel="stylesheet" href="https://unpkg.com/jspsych@8.3.0/css/jspsych.css">
+  <script src="https://unpkg.com/jspsych@8.3.0"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-preload@2.1.0"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-html-button-response@2.1.0"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-image-keyboard-response@2.2.0"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-image-button-response@2.2.0"></script>
+  <script src="https://unpkg.com/@jspsych/extension-pipe@0.2.0"></script>
+  <style>
+    body { background: #f7f8f5; color: #18271b; font-family: system-ui, sans-serif; }
+    .jspsych-content { max-width: 850px; }
+    .jspsych-btn { font-size: 1.15rem; padding: .8rem 1.6rem; margin: .5rem; cursor: pointer; }
+    .message { margin: 15vh auto; max-width: 700px; padding: 24px; text-align: center; }
+    .message input { font-size: 1.2rem; padding: .7rem; max-width: 90%; }
+    .message button { font-size: 1.1rem; padding: .7rem 1.4rem; margin: 1rem; }
+  </style>
+</head>
+<body>
+  <main class="message" id="setup">
+    <h1>森林情緒研究</h1>
+    <p>請由研究人員輸入匿名受試者編號（例如 A001）。</p>
+    <form id="start-form">
+      <input id="participant-id" required pattern="[A-Za-z0-9_-]{1,24}" maxlength="24" autocomplete="off" placeholder="受試者編號">
+      <button type="submit">繼續</button>
+    </form>
+    <p id="status" role="alert"></p>
+  </main>
+  <script>
+    const DATA_PIPE_ID = 'cUFTm2LK3bOs';
+    const setup = document.getElementById('setup');
+    const status = document.getElementById('status');
+
+    document.getElementById('start-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const participantId = document.getElementById('participant-id').value.trim();
+      if (!/^[A-Za-z0-9_-]{1,24}$/.test(participantId)) {
+        status.textContent = '請輸入英文字母、數字、- 或 _ 組成的匿名編號。';
+        return;
+      }
+      event.submitter.disabled = true;
+      status.textContent = '正在檢查圖片清單…';
+
+      try {
+        if (!/^[A-Za-z0-9]{12}$/.test(DATA_PIPE_ID)) {
+          throw new Error('請先填入 DataPipe 儀表板的 12 碼 Experiment ID。');
+        }
+        const response = await fetch('stimuli.json', { cache: 'no-store' });
+        if (!response.ok) throw new Error('無法讀取 stimuli.json');
+        const stimuli = await response.json();
+        const validList = (items, prefix) => Array.isArray(items) && items.length === 24 &&
+          new Set(items).size === 24 && items.every(path =>
+            typeof path === 'string' && path.startsWith(prefix) &&
+            /\.(png|jpe?g|webp)$/i.test(path));
+        if (!validList(stimuli.forest, 'images/forest/') ||
+            !validList(stimuli.target, 'images/target/')) {
+          throw new Error('森林圖片與文字圖片各需 24 張，且須在指定資料夾。');
+        }
+
+        const forests = [...stimuli.forest];
+        const targets = [...stimuli.target];
+        const filename = `AMP_${participantId}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}.csv`;
+        let jsPsych;
+
+        const buildCsv = () => {
+          const rows = jsPsych.data.get().filter({ task: 'amp_response' }).values();
+          if (rows.length !== 24) throw new Error('測驗未完成 24 次。');
+          return [
+            'trial_number,response,seconds',
+            ...rows.map(row => [
+              row.trial_number, row.response_label,
+              (row.rt / 1000).toFixed(3)
+            ].map(value => `"${String(value ?? '').replaceAll('"', '""')}"`).join(','))
+          ].join('\r\n');
+        };
+
+        const fallbackDownload = () => {
+          try {
+            const blob = new Blob(['\uFEFF', buildCsv()], { type: 'text/csv;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            link.textContent = '點此下載備份 CSV';
+            document.body.innerHTML = '<main class="message"><h1>線上儲存失敗</h1><p>請先下載備份檔，通知研究人員檢查網路與儲存設定。</p></main>';
+            document.querySelector('.message').appendChild(link);
+            link.click();
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+          } catch (error) {
+            document.body.innerHTML = '<main class="message"><h1>儲存失敗</h1><p>請保留這個畫面，立刻通知研究人員。</p></main>';
+            console.error(error);
+          }
+        };
+
+        jsPsych = initJsPsych({
+          extensions: [{
+            type: jsPsychExtensionPipe,
+            params: {
+              experiment_id: DATA_PIPE_ID,
+              filename,
+              stream: true,
+              data_string: buildCsv,
+              wait_message: '<p>資料儲存中，請不要關閉頁面…</p>',
+              done_message: '<p>資料已送出，請研究人員確認後再關閉頁面。</p>',
+              on_save: (result) => {
+                if (result.ok) {
+                  document.body.innerHTML = '<main class="message"><h1>測驗完成</h1><p>資料已送出。請研究人員在儲存資料夾核對後再進行下一位。</p></main>';
+                } else {
+                  fallbackDownload();
+                }
+              }
+            }
+          }]
+        });
+        const forestOrder = jsPsych.randomization.shuffle(forests);
+        const targetOrder = jsPsych.randomization.shuffle(targets);
+        const timeline = [
+          {
+            type: jsPsychPreload,
+            images: [...forests, ...targets],
+            continue_after_error: false,
+            message: '圖片載入中，請稍候…'
+          },
+          {
+            type: jsPsychHtmlButtonResponse,
+            stimulus: '<h2>測驗說明</h2><p>每次會先快速出現一張森林圖片，再出現一張文字圖片。</p><p>請只依直覺評價<strong>文字圖片</strong>，選擇「喜歡」或「不喜歡」，並忽略先前的森林圖片。</p><p>共 24 次；請依研究人員說明開始。</p>',
+            choices: ['開始測驗']
+          }
+        ];
+
+        for (let i = 0; i < 24; i++) {
+          timeline.push({
+            type: jsPsychImageKeyboardResponse,
+            stimulus: forestOrder[i],
+            choices: 'NO_KEYS',
+            trial_duration: 100,
+            stimulus_width: 640,
+            maintain_aspect_ratio: true,
+            data: { task: 'forest_prime', participant_id: participantId, trial_number: i + 1 },
+            on_finish: (data) => { delete data.stimulus; }
+          });
+          timeline.push({
+            type: jsPsychImageButtonResponse,
+            stimulus: targetOrder[i],
+            choices: ['不喜歡', '喜歡'],
+            stimulus_width: 350,
+            maintain_aspect_ratio: true,
+            prompt: '<p>請只評價這張文字圖片</p>',
+            data: {
+              task: 'amp_response', participant_id: participantId,
+              trial_number: i + 1
+            },
+            on_finish: (data) => {
+              data.response_label = data.response === 0 ? '不喜歡' : '喜歡';
+              delete data.stimulus;
+            }
+          });
+        }
+
+        setup.remove();
+        await jsPsych.run(timeline);
+      } catch (error) {
+        if (setup.isConnected) {
+          status.textContent = '啟動失敗：' + error.message;
+          document.querySelector('#start-form button').disabled = false;
+        } else {
+          document.body.innerHTML = '<main class="message"><h1>測驗中斷</h1><p>請保留畫面並通知研究人員。</p></main>';
+        }
+        console.error(error);
+      }
+    });
+  </script>
+</body>
+</html>
