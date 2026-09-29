@@ -108,7 +108,7 @@
               done_message: '<p>資料已送出，請研究人員確認後再關閉頁面。</p>',
               on_save: (result) => {
                 if (result.ok) {
-                  document.body.innerHTML = '<main class="message"><h1>測驗完成</h1><p>資料已送出。請研究人員在儲存資料夾核對後再進行下一位。</p></main>';
+                  document.body.innerHTML = '<main class="message"><h1>測驗完成</h1><p>資料已送出。請接著填寫問卷。</p><p><a href="https://forms.gle/55jhhAbgPhV7v8Yz8" style="display:inline-block;padding:14px 22px;background:#245b36;color:white;border-radius:8px;text-decoration:none">繼續填寫問卷</a></p></main>';
                 } else {
                   fallbackDownload();
                 }
